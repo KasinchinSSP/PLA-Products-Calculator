@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PLA Products Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap");
+      body {
+        font-family: "Sarabun", sans-serif;
+      }
+      .badge {
+        font-size: 11px;
+      }
+      fieldset:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .fade {
+        transition: opacity 0.25s ease;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <header class="bg-white border-b sticky top-0 z-10">
+      <div
+        class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between"
+      >
+        <div class="flex items-center gap-2">
+          <h1 class="text-lg md:text-xl font-bold text-gray-800">
+            PLA Products Calculator
+          </h1>
+          <span
+            id="dataset-version"
+            class="badge px-2 py-0.5 rounded bg-gray-100 text-gray-600"
+            >v—</span
+          >
+        </div>
+        <div id="dataset-updated" class="text-xs text-gray-500">อัปเดต —</div>
+      </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto p-4 md:p-8 space-y-6">
+      <!-- Status -->
+      <div
+        id="status"
+        class="fade text-sm rounded-lg border p-3 bg-white text-gray-700"
+      >
+        กำลังโหลดข้อมูลผลิตภัณฑ์…
+      </div>
+
+      <!-- Main Form -->
+      <section class="bg-white rounded-2xl shadow p-6 space-y-5">
+        <fieldset id="calculation-form" disabled class="space-y-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label for="plan" class="block text-sm font-medium text-gray-700"
+                >เลือกแบบประกันหลัก</label
+              >
+              <select
+                id="plan"
+                class="mt-1 block w-full rounded-md border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+              ></select>
+            </div>
+            <div>
+              <label
+                for="gender"
+                class="block text-sm font-medium text-gray-700"
+                >เพศ</label
+              >
+              <select
+                id="gender"
+                class="mt-1 block w-full rounded-md border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="female">หญิง</option>
+                <option value="male">ชาย</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label for="age" class="block text-sm font-medium text-gray-700"
+                >อายุ (ปี)</label
+              >
+              <input
+                type="number"
+                id="age"
+                inputmode="numeric"
+                class="mt-1 block w-full rounded-md border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="ระบุอายุ"
+              />
+              <p id="age-hint" class="mt-1 text-xs text-gray-500"></p>
+            </div>
+            <div>
+              <label
+                for="sumAssured"
+                class="block text-sm font-medium text-gray-700"
+                >จำนวนเงินเอาประกันภัย (สัญญาหลัก)</label
+              >
+              <input
+                type="number"
+                id="sumAssured"
+                step="10000"
+                inputmode="numeric"
+                class="mt-1 block w-full rounded-md border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="ระบุทุนประกัน"
+              />
+              <p id="sum-assured-hint" class="mt-1 text-xs text-gray-500"></p>
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button
+              id="calculate-btn"
+              class="w-full py-3 rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              คำนวณเบี้ยประกันหลัก (รายปี)
+            </button>
+          </div>
+        </fieldset>
+      </section>
+
+      <section
+        id="result-container"
+        class="hidden bg-gray-50 rounded-xl border p-6"
+      ></section>
+    </main>
+
+    <script src="calculator.js"></script>
+  </body>
+</html>

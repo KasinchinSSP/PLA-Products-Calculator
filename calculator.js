@@ -1,0 +1,278 @@
+/* calculator.js — Runtime fetch JSON (no uploads, no riders) */
+
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status");
+  const formEl = $("calculation-form");
+  const planEl = $("plan");
+  const genderEl = $("gender");
+  const ageEl = $("age");
+  const sumEl = $("sumAssured");
+  const sumHintEl = $("sum-assured-hint");
+  const ageHintEl = $("age-hint");
+  const resultEl = $("result-container");
+  const dsVersionEl = $("dataset-version");
+  const dsUpdatedEl = $("dataset-updated");
+
+  const THB = new Intl.NumberFormat("th-TH");
+  const state = {
+    dataset: null,
+    plansByKey: new Map(),
+  };
+
+  // ------- Utilities -------
+  const setStatus = (msg, tone = "info") => {
+    const tones = {
+      info: "bg-white border-gray-200 text-gray-700",
+      ok: "bg-green-50 border-green-200 text-green-800",
+      warn: "bg-yellow-50 border-yellow-200 text-yellow-800",
+      err: "bg-rose-50 border-rose-200 text-rose-800",
+    };
+    statusEl.className = `fade text-sm rounded-lg border p-3 ${
+      tones[tone] || tones.info
+    }`;
+    statusEl.textContent = msg;
+  };
+
+  const coerceInt = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : NaN;
+  };
+
+  const ceilTo = (num, unit = 1) => Math.ceil(num / unit) * unit;
+
+  // Simple schema guard for minimal safety
+  const validateDataset = (data) => {
+    if (!data || typeof data !== "object")
+      throw new Error("รูปแบบข้อมูลไม่ถูกต้อง");
+    if (!Array.isArray(data.plans) || data.plans.length === 0)
+      throw new Error("ไม่พบรายการแบบประกันในไฟล์");
+    data.plans.forEach((p, i) => {
+      if (!p.planKey || !p.planName)
+        throw new Error(`แผนลำดับที่ ${i + 1} ไม่มี planKey/planName`);
+      if (
+        !p.ageRange ||
+        typeof p.ageRange.min !== "number" ||
+        typeof p.ageRange.max !== "number"
+      )
+        throw new Error(`แผน ${p.planKey} ไม่มีช่วงอายุที่ถูกต้อง`);
+      if (p.minSumAssured == null || p.minSumAssured <= 0)
+        throw new Error(`แผน ${p.planKey} มี minSumAssured ไม่ถูกต้อง`);
+      if (!p.calculationType)
+        throw new Error(`แผน ${p.planKey} ไม่มี calculationType`);
+
+      if (p.calculationType === "rateTable") {
+        if (!Array.isArray(p.rates) || p.rates.length === 0)
+          throw new Error(`แผน ${p.planKey} ไม่มีตารางอัตรา (rates)`);
+        p.rates.forEach((r) => {
+          if (typeof r.age !== "number")
+            throw new Error(`แผน ${p.planKey} rate ขาดค่า age`);
+          if (typeof r.male !== "number" || typeof r.female !== "number")
+            throw new Error(`แผน ${p.planKey} rate ของชาย/หญิงไม่ถูกต้อง`);
+        });
+      } else if (p.calculationType === "fixedRatePer1000") {
+        if (typeof p.fixedRate !== "number")
+          throw new Error(`แผน ${p.planKey} ต้องกำหนด fixedRate`);
+      } else {
+        throw new Error(
+          `แผน ${p.planKey} มี calculationType ไม่รองรับ: ${p.calculationType}`
+        );
+      }
+    });
+    return true;
+  };
+
+  // ------- Premium Engine -------
+  function lookupRate(plan, age, sex) {
+    if (plan.calculationType === "fixedRatePer1000") {
+      return plan.fixedRate;
+    }
+    // rateTable: หาค่า exact age
+    const row = plan.rates.find((r) => r.age === age);
+    if (!row) return null;
+    return sex === "male" ? row.male : row.female;
+  }
+
+  function applyDiscountPerThousand(plan, sumAssured, ratePerThousand) {
+    if (!Array.isArray(plan.discounts) || plan.discounts.length === 0)
+      return ratePerThousand;
+    // หา "ขั้นที่เข้าเกณฑ์สูงสุด"
+    const sorted = [...plan.discounts].sort(
+      (a, b) => (a.minSum || 0) - (b.minSum || 0)
+    );
+    let disc = 0;
+    for (const d of sorted) {
+      if (sumAssured >= (d.minSum || 0)) disc = d.discountPer1000 || 0;
+    }
+    const eff = ratePerThousand - disc;
+    return eff < 0 ? 0 : eff;
+  }
+
+  function computeAnnualPremium(plan, sex, age, sumAssured) {
+    // validate simple constraints
+    if (age < plan.ageRange.min || age > plan.ageRange.max) {
+      throw new Error(
+        `อายุไม่อยู่ในช่วงที่รองรับ (${plan.ageRange.min}–${plan.ageRange.max})`
+      );
+    }
+    if (sumAssured < plan.minSumAssured) {
+      throw new Error(
+        `ทุนประกันต่ำกว่าขั้นต่ำ (${THB.format(plan.minSumAssured)} บาท)`
+      );
+    }
+
+    const baseRate = lookupRate(plan, age, sex);
+    if (baseRate == null) {
+      // แจ้งปีที่รองรับเพื่อช่วยผู้ใช้
+      const years = (plan.rates || []).map((r) => r.age).sort((a, b) => a - b);
+      const msg = years.length
+        ? `อายุ ${age} ไม่มีเรตในตาราง สำหรับแผนนี้รองรับปี: ${years[0]}–${
+            years[years.length - 1]
+          } (รายปีต่อปี)`
+        : `อายุ ${age} ไม่มีเรตในตาราง`;
+      throw new Error(msg);
+    }
+
+    const rateEff = applyDiscountPerThousand(plan, sumAssured, baseRate);
+    const annual = ceilTo((sumAssured / 1000) * rateEff, 1); // ปัดบาทขึ้น
+    return { baseRate, rateEff, annual };
+  }
+
+  // ------- UI Logic -------
+  function populatePlans(plans) {
+    planEl.innerHTML = "";
+    for (const p of plans) {
+      const opt = document.createElement("option");
+      opt.value = p.planKey;
+      opt.textContent = p.planName;
+      planEl.appendChild(opt);
+    }
+  }
+
+  function updateHintsFor(plan) {
+    sumEl.min = String(plan.minSumAssured || 0);
+    sumEl.placeholder = `ไม่น้อยกว่า ${THB.format(plan.minSumAssured)} บาท`;
+    sumHintEl.textContent = `ขั้นต่ำ: ${THB.format(plan.minSumAssured)} บาท`;
+
+    ageEl.min = String(plan.ageRange?.min ?? 0);
+    ageEl.max = String(plan.ageRange?.max ?? 120);
+    ageHintEl.textContent = `ช่วงอายุที่รับ: ${plan.ageRange.min}–${plan.ageRange.max} ปี`;
+
+    // ถ้าเป็น rateTable ให้แนะนำผู้ใช้ว่าใช้ “รายปี” (exact age)
+    if (plan.calculationType === "rateTable" && Array.isArray(plan.rates)) {
+      const minAge = Math.min(...plan.rates.map((r) => r.age));
+      const maxAge = Math.max(...plan.rates.map((r) => r.age));
+      ageHintEl.textContent += ` • ตารางเรตรายปี: ${minAge}–${maxAge}`;
+    }
+  }
+
+  function renderResult({ plan, sex, age, sumAssured, breakdown }) {
+    resultEl.classList.remove("hidden");
+    resultEl.innerHTML = `
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold text-gray-800">ผลการคำนวณ</h3>
+        <span class="text-xs text-gray-500">หน่วย: บาท</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <div><span class="text-gray-500">แบบประกัน:</span> <span class="font-medium">${
+          plan.planName
+        }</span></div>
+        <div><span class="text-gray-500">ทุนประกัน:</span> <span class="font-medium">${THB.format(
+          sumAssured
+        )}</span></div>
+        <div><span class="text-gray-500">เพศ:</span> <span class="font-medium">${
+          sex === "male" ? "ชาย" : "หญิง"
+        }</span></div>
+        <div><span class="text-gray-500">อายุ:</span> <span class="font-medium">${age} ปี</span></div>
+      </div>
+
+      <div class="mt-4 rounded-lg bg-white border p-4 text-sm">
+        <div class="flex items-center justify-between">
+          <div class="text-gray-500">อัตราฐานต่อทุน 1,000</div>
+          <div class="font-semibold">${THB.format(breakdown.baseRate)}</div>
+        </div>
+        <div class="flex items-center justify-between mt-1">
+          <div class="text-gray-500">อัตราหลังหักส่วนลดขั้นบันได (ถ้ามี)</div>
+          <div class="font-semibold">${THB.format(breakdown.rateEff)}</div>
+        </div>
+        <hr class="my-3"/>
+        <div class="flex items-center justify-between">
+          <div class="text-gray-700 font-medium">เบี้ยประกัน “รายปี”</div>
+          <div class="text-indigo-700 font-bold text-lg">${THB.format(
+            breakdown.annual
+          )}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ------- Events -------
+  planEl.addEventListener("change", () => {
+    const plan = state.plansByKey.get(planEl.value);
+    if (plan) updateHintsFor(plan);
+  });
+
+  $("calculate-btn").addEventListener("click", (e) => {
+    e.preventDefault();
+    try {
+      const plan = state.plansByKey.get(planEl.value);
+      if (!plan) throw new Error("ยังไม่พบข้อมูลแบบประกัน");
+
+      const sex = genderEl.value === "male" ? "male" : "female";
+      const age = coerceInt(ageEl.value);
+      const sumAssured = coerceInt(sumEl.value);
+
+      if (!Number.isFinite(age)) throw new Error("กรุณาระบุอายุเป็นตัวเลข");
+      if (!Number.isFinite(sumAssured))
+        throw new Error("กรุณาระบุทุนประกันเป็นตัวเลข");
+
+      const breakdown = computeAnnualPremium(plan, sex, age, sumAssured);
+      renderResult({ plan, sex, age, sumAssured, breakdown });
+      setStatus("คำนวณสำเร็จ", "ok");
+    } catch (err) {
+      setStatus(err.message || "เกิดข้อผิดพลาดในการคำนวณ", "err");
+      resultEl.classList.add("hidden");
+    }
+  });
+
+  // ------- Boot: fetch dataset at runtime -------
+  async function boot() {
+    try {
+      // ถ้าต้อง bust cache: เพิ่ม ?v=YYYYMMDD ตามเวอร์ชันจริงได้
+      const res = await fetch("./pla_insurance.json", { cache: "no-cache" });
+      if (!res.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${res.status})`);
+      const data = await res.json();
+
+      validateDataset(data);
+      state.dataset = data;
+
+      // index plans
+      state.plansByKey.clear();
+      data.plans.forEach((p) => state.plansByKey.set(p.planKey, p));
+
+      // populate UI
+      populatePlans(data.plans);
+      const firstPlan = data.plans[0];
+      if (firstPlan) updateHintsFor(firstPlan);
+
+      // header badges
+      dsVersionEl.textContent = data?.fileInfo?.version
+        ? `v${data.fileInfo.version}`
+        : "v—";
+      dsUpdatedEl.textContent = data?.fileInfo?.lastUpdated
+        ? `อัปเดตล่าสุด: ${data.fileInfo.lastUpdated}`
+        : "อัปเดต —";
+
+      formEl.disabled = false;
+      setStatus(
+        `โหลดข้อมูลสำเร็จ • พบแบบประกัน ${data.plans.length} แบบ`,
+        "ok"
+      );
+    } catch (err) {
+      formEl.disabled = true;
+      setStatus(err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล", "err");
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", boot);
+})();

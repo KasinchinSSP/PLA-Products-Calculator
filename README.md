@@ -1,2 +1,17 @@
-# PLA-Products-Calculator
-PLA Products Calculator
+เครื่องคำนวณเบี้ยประกันอัจฉริยะ - คู่มือข้อมูลเอกสารนี้อธิบายโครงสร้างของไฟล์ insurance_data.json ที่ใช้สำหรับแอปพลิเคชันเครื่องคำนวณเบี้ยประกันอัจฉริยะโครงสร้างหลัก (Root Structure)ไฟล์ JSON ต้องมีโครงสร้างหลัก 2 ส่วนคือ fileInfo และ plans{
+"fileInfo": { ... },
+"plans": [ ... ]
+}
+
+1. fileInfo (Object)อ็อบเจกต์ที่ใช้อธิบายข้อมูลเกี่ยวกับไฟล์นี้ ประกอบด้วย:version (String): เวอร์ชั่นของไฟล์ข้อมูลdescription (String): คำอธิบายสั้นๆ เกี่ยวกับไฟล์lastUpdated (String): วันที่อัปเดตล่าสุด (รูปแบบ: YYYY-MM-DD)2. plans (Array of Objects)อาร์เรย์ที่เก็บข้อมูลของแบบประกันแต่ละตัว โดยแต่ละอ็อบเจกต์ในอาร์เรย์นี้คือ 1 แบบประกัน และต้องมีโครงสร้างดังนี้:| Key | Type | Required? | Description || planKey | String | Yes | รหัสเฉพาะสำหรับแบบประกัน (ห้ามซ้ำกัน) ใช้เป็น value ใน dropdown || planName | String | Yes | ชื่อเต็มของแบบประกันที่จะแสดงให้ผู้ใช้เห็น || ageRange | Object | Yes | อ็อบเจกต์ที่ระบุช่วงอายุที่รับประกัน ประกอบด้วย min และ max (Number) || minSumAssured | Number | Yes | จำนวนเงินเอาประกันภัยขั้นต่ำที่รับได้ || calculationType | String | Yes | ประเภทการคำนวณ มี 2 ค่า: "rateTable" (ใช้ตาราง) หรือ "fixedRatePer1000" (ใช้อัตราคงที่) || fixedRate | Number | No | (ต้องมีถ้า calculationType คือ fixedRatePer1000) อัตราเบี้ยคงที่ต่อทุนประกัน 1,000 บาท || rates | Array | No | (ต้องมีถ้า calculationType คือ rateTable) อาร์เรย์ของอัตราเบี้ยตามอายุและเพศ (ดูโครงสร้างด้านล่าง) || discounts | Array | No | (Optional) อาร์เรย์ของข้อมูลส่วนลดเบี้ยประกัน (ดูโครงสร้างด้านล่าง) |โครงสร้างของ rates (Array of Objects)แต่ละอ็อบเจกต์ในอาร์เรย์ rates จะระบุอัตราเบี้ยสำหรับแต่ละช่วงอายุ{
+   "age": 45,
+   "female": 160.79,
+   "male": 169.77
+   }
+
+age (Number): อายุfemale (Number): อัตราเบี้ยต่อทุน 1,000 บาท สำหรับเพศหญิงmale (Number): อัตราเบี้ยต่อทุน 1,000 บาท สำหรับเพศชายโครงสร้างของ discounts (Array of Objects)แต่ละอ็อบเจกต์ในอาร์เรย์ discounts จะระบุเงื่อนไขและอัตราส่วนลด{
+"minSum": 1000000,
+"discountPer1000": 3
+}
+
+minSum (Number): จำนวนเงินเอาประกันภัยขั้นต่ำที่จะได้รับส่วนลดนี้discountPer1000 (Number): ส่วนลดที่จะได้รับต่อทุนประกันทุกๆ 1,000 บาทสำคัญ: ควรเรียงข้อมูลส่วนลดจากทุนประกันสูงสุดไปหาต่ำสุด เพื่อให้โปรแกรมคำนวณส่วนลดที่ถูกต้องได้
