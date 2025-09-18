@@ -342,3 +342,69 @@
 
   document.addEventListener("DOMContentLoaded", boot);
 })();
+
+// === Mobile UI helpers ===
+const $q = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const resultWrap = document.getElementById("result-container");
+
+// gender segmented -> ซิงก์กับ #gender
+$$(".gender-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$(".gender-btn").forEach((b) => b.setAttribute("aria-selected", "false"));
+    btn.setAttribute("aria-selected", "true");
+    document.getElementById("gender").value = btn.dataset.g;
+  });
+});
+// ตั้งค่าเริ่มต้นเพศหญิง
+$q('.gender-btn[data-g="female"]')?.setAttribute("aria-selected", "true");
+
+// age stepper
+document.getElementById("age-dec")?.addEventListener("click", () => {
+  const v = parseInt(document.getElementById("age").value || "0", 10) || 0;
+  document.getElementById("age").value = Math.max(0, v - 1);
+});
+document.getElementById("age-inc")?.addEventListener("click", () => {
+  const v = parseInt(document.getElementById("age").value || "0", 10) || 0;
+  document.getElementById("age").value = v + 1;
+});
+
+// sumAssured chips
+$$(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    document.getElementById("sumAssured").value = chip.dataset.sa;
+  });
+});
+
+// modal segmented (ใช้สำหรับไฮไลต์ผลลัพธ์)
+let highlightedModal = "annual";
+$$(".modal-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$(".modal-btn").forEach((b) => b.setAttribute("aria-selected", "false"));
+    btn.setAttribute("aria-selected", "true");
+    highlightedModal = btn.dataset.modal; // annual|semi|quarter|month
+  });
+});
+$q('.modal-btn[data-modal="annual"]')?.setAttribute("aria-selected", "true");
+
+// เปิด bottom sheet เมื่อคำนวณสำเร็จ: wrap ผลลัพธ์
+const oldRender = renderResult; // อิงจากฟังก์ชันที่คุณมีอยู่
+renderResult = (payload) => {
+  oldRender(payload); // เติม HTML เดิมเข้า #result-container
+  // ห่อผลลัพธ์ให้เป็นแผ่น sheet + เพิ่ม grabber
+  const html = resultWrap.innerHTML;
+  resultWrap.innerHTML = `<div class="sheet">${'<div class="grabber"></div>'}${html}</div>`;
+  resultWrap.classList.add("open");
+  // ไฮไลต์งวดที่เลือก (ใส่ตัวหนา/สี)
+  try {
+    const map = { annual: 1, semi: 2, quarter: 3, month: 4 };
+    const row = resultWrap.querySelector(
+      `table tbody tr:nth-child(${map[highlightedModal]})`
+    );
+    row?.classList.add("bg-indigo-50");
+  } catch {}
+};
+// ปิด sheet เมื่อแตะนอก/ปัดลง (อย่างง่าย)
+resultWrap.addEventListener("click", (e) => {
+  if (e.target.id === "result-container") resultWrap.classList.remove("open");
+});
