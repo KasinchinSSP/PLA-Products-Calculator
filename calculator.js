@@ -1,9 +1,14 @@
-/* calculator.js — Runtime fetch JSON (no uploads, no riders) + โมดลงวดชำระ */
+/* calculator.js — FINAL (mobile-first, runtime fetch JSON, no uploads, no riders)
+   - Fixes loading hang, robust fetch errors, works with Index (mobile UI)
+   - Bottom sheet result + segmented buttons + chips + stepper
+*/
 
 (() => {
   const $ = (id) => document.getElementById(id);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  // Elements
   const statusEl = $("status");
-  const formEl = $("calculation-form");
   const planEl = $("plan");
   const genderEl = $("gender");
   const ageEl = $("age");
@@ -23,10 +28,11 @@
       semiAnnual: 0.52,
       quarterly: 0.27,
       monthly: 0.09,
-    }, // default fallback
+    }, // fallback
+    highlightedModal: "annual", // annual | semi | quarter | month
   };
 
-  // ------- Utilities -------
+  // ---------- Utils ----------
   const setStatus = (msg, tone = "info") => {
     const tones = {
       info: "bg-white border-gray-200 text-gray-700",
@@ -47,12 +53,14 @@
 
   const ceilTo = (num, unit = 1) => Math.ceil(num / unit) * unit;
 
+  // ---------- Validation ----------
   const validateDataset = (data) => {
     if (!data || typeof data !== "object")
       throw new Error("รูปแบบข้อมูลไม่ถูกต้อง");
     if (!Array.isArray(data.plans) || data.plans.length === 0)
       throw new Error("ไม่พบรายการแบบประกันในไฟล์");
-    // modal factors (optional): รองรับทั้ง data.metadata.modalFactors หรือ data.modalFactors
+
+    // modal factors (optional)
     const mf = data?.metadata?.modalFactors || data?.modalFactors;
     if (mf && typeof mf === "object") {
       const { annual, semiAnnual, quarterly, monthly } = mf;
@@ -97,14 +105,13 @@
         );
       }
     });
+
     return true;
   };
 
-  // ------- Premium Engine -------
+  // ---------- Engine ----------
   function lookupRate(plan, age, sex) {
-    if (plan.calculationType === "fixedRatePer1000") {
-      return plan.fixedRate;
-    }
+    if (plan.calculationType === "fixedRatePer1000") return plan.fixedRate;
     const row = plan.rates.find((r) => r.age === age); // exact age table
     if (!row) return null;
     return sex === "male" ? row.male : row.female;
@@ -125,16 +132,14 @@
   }
 
   function computeAnnualPremium(plan, sex, age, sumAssured) {
-    if (age < plan.ageRange.min || age > plan.ageRange.max) {
+    if (age < plan.ageRange.min || age > plan.ageRange.max)
       throw new Error(
         `อายุไม่อยู่ในช่วงที่รองรับ (${plan.ageRange.min}–${plan.ageRange.max})`
       );
-    }
-    if (sumAssured < plan.minSumAssured) {
+    if (sumAssured < plan.minSumAssured)
       throw new Error(
         `ทุนประกันต่ำกว่าขั้นต่ำ (${THB.format(plan.minSumAssured)} บาท)`
       );
-    }
 
     const baseRate = lookupRate(plan, age, sex);
     if (baseRate == null) {
@@ -159,7 +164,7 @@
     return { annual, semi, quarter, month };
   }
 
-  // ------- UI Logic -------
+  // ---------- UI ----------
   function populatePlans(plans) {
     planEl.innerHTML = "";
     for (const p of plans) {
@@ -187,97 +192,103 @@
   }
 
   function renderResult({ plan, sex, age, sumAssured, breakdown, modal }) {
-    resultEl.classList.remove("hidden");
-    resultEl.innerHTML = `
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold text-gray-800">ผลการคำนวณ</h3>
-        <span class="text-xs text-gray-500">หน่วย: บาท</span>
+    const inner = `
+      <div class=\"flex items-center justify-between mb-3\">
+        <h3 class=\"text-lg font-semibold text-gray-800\">ผลการคำนวณ</h3>
+        <span class=\"text-xs text-gray-500\">หน่วย: บาท</span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-        <div><span class="text-gray-500">แบบประกัน:</span> <span class="font-medium">${
+      <div class=\"grid grid-cols-1 md:grid-cols-2 gap-3 text-sm\">
+        <div><span class=\"text-gray-500\">แบบประกัน:</span> <span class=\"font-medium\">${
           plan.planName
         }</span></div>
-        <div><span class="text-gray-500">ทุนประกัน:</span> <span class="font-medium">${THB.format(
+        <div><span class=\"text-gray-500\">ทุนประกัน:</span> <span class=\"font-medium\">${THB.format(
           sumAssured
         )}</span></div>
-        <div><span class="text-gray-500">เพศ:</span> <span class="font-medium">${
+        <div><span class=\"text-gray-500\">เพศ:</span> <span class=\"font-medium\">${
           sex === "male" ? "ชาย" : "หญิง"
         }</span></div>
-        <div><span class="text-gray-500">อายุ:</span> <span class="font-medium">${age} ปี</span></div>
+        <div><span class=\"text-gray-500\">อายุ:</span> <span class=\"font-medium\">${age} ปี</span></div>
       </div>
 
-      <div class="mt-4 rounded-lg bg-white border p-4 text-sm">
-        <div class="flex items-center justify-between">
-          <div class="text-gray-500">อัตราฐานต่อทุน 1,000</div>
-          <div class="font-semibold">${THB.format(breakdown.baseRate)}</div>
+      <div class=\"mt-4 rounded-lg bg-white border p-4 text-sm\">
+        <div class=\"flex items-center justify-between\">
+          <div class=\"text-gray-500\">อัตราฐานต่อทุน 1,000</div>
+          <div class=\"font-semibold\">${THB.format(breakdown.baseRate)}</div>
         </div>
-        <div class="flex items-center justify-between mt-1">
-          <div class="text-gray-500">อัตราหลังหักส่วนลดขั้นบันได (ถ้ามี)</div>
-          <div class="font-semibold">${THB.format(breakdown.rateEff)}</div>
+        <div class=\"flex items-center justify-between mt-1\">
+          <div class=\"text-gray-500\">อัตราหลังหักส่วนลดขั้นบันได (ถ้ามี)</div>
+          <div class=\"font-semibold\">${THB.format(breakdown.rateEff)}</div>
         </div>
-        <hr class="my-3"/>
+        <hr class=\"my-3\"/>
 
-        <div class="overflow-hidden rounded-md border">
-          <table class="min-w-full text-sm">
-            <thead class="bg-gray-50 text-gray-600">
+        <div class=\"overflow-hidden rounded-md border\">
+          <table class=\"min-w-full text-sm\">
+            <thead class=\"bg-gray-50 text-gray-600\">
               <tr>
-                <th class="text-left px-3 py-2">งวดชำระ</th>
-                <th class="text-right px-3 py-2">เบี้ย (บาท)</th>
-                <th class="text-right px-3 py-2 text-xs font-normal">ตัวคูณ</th>
+                <th class=\"text-left px-3 py-2\">งวดชำระ</th>
+                <th class=\"text-right px-3 py-2\">เบี้ย (บาท)</th>
+                <th class=\"text-right px-3 py-2 text-xs font-normal\">ตัวคูณ</th>
               </tr>
             </thead>
             <tbody>
-              <tr class="border-t">
-                <td class="px-3 py-2">รายปี</td>
-                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+              <tr class=\"border-t\" data-modal-row=\"annual\">
+                <td class=\"px-3 py-2\">รายปี</td>
+                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
                   modal.annual
                 )}</td>
-                <td class="px-3 py-2 text-right">${
+                <td class=\"px-3 py-2 text-right\">${
                   state.modalFactors.annual
                 }</td>
               </tr>
-              <tr class="border-t">
-                <td class="px-3 py-2">ราย 6 เดือน</td>
-                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+              <tr class=\"border-t\" data-modal-row=\"semi\">
+                <td class=\"px-3 py-2\">ราย 6 เดือน</td>
+                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
                   modal.semi
                 )}</td>
-                <td class="px-3 py-2 text-right">${
+                <td class=\"px-3 py-2 text-right\">${
                   state.modalFactors.semiAnnual
                 }</td>
               </tr>
-              <tr class="border-t">
-                <td class="px-3 py-2">ราย 3 เดือน</td>
-                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+              <tr class=\"border-t\" data-modal-row=\"quarter\">
+                <td class=\"px-3 py-2\">ราย 3 เดือน</td>
+                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
                   modal.quarter
                 )}</td>
-                <td class="px-3 py-2 text-right">${
+                <td class=\"px-3 py-2 text-right\">${
                   state.modalFactors.quarterly
                 }</td>
               </tr>
-              <tr class="border-t">
-                <td class="px-3 py-2">รายเดือน</td>
-                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+              <tr class=\"border-t\" data-modal-row=\"month\">
+                <td class=\"px-3 py-2\">รายเดือน</td>
+                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
                   modal.month
                 )}</td>
-                <td class="px-3 py-2 text-right">${
+                <td class=\"px-3 py-2 text-right\">${
                   state.modalFactors.monthly
                 }</td>
               </tr>
             </tbody>
           </table>
         </div>
-      </div>
-    `;
+      </div>`;
+
+    resultEl.innerHTML = `<div class="sheet p-4"><div class="grabber"></div>${inner}</div>`;
+    resultEl.classList.add("open");
+
+    const row = resultEl.querySelector(
+      `[data-modal-row="${state.highlightedModal}"]`
+    );
+    row?.classList.add("bg-indigo-50");
   }
 
-  // ------- Events -------
+  // ---------- Events ----------
   planEl.addEventListener("change", () => {
     const plan = state.plansByKey.get(planEl.value);
     if (plan) updateHintsFor(plan);
   });
 
-  $("calculate-btn").addEventListener("click", (e) => {
+  document.getElementById("calculate-btn").addEventListener("click", (e) => {
     e.preventDefault();
     try {
       const plan = state.plansByKey.get(planEl.value);
@@ -297,114 +308,128 @@
       renderResult({ plan, sex, age, sumAssured, breakdown, modal });
       setStatus("คำนวณสำเร็จ", "ok");
     } catch (err) {
+      console.error(err);
       setStatus(err.message || "เกิดข้อผิดพลาดในการคำนวณ", "err");
-      resultEl.classList.add("hidden");
+      resultEl.classList.remove("open");
+      resultEl.innerHTML = "";
     }
   });
 
-  // ------- Boot: fetch dataset at runtime -------
+  // Close bottom sheet when clicking outside content
+  resultEl.addEventListener("click", (e) => {
+    if (e.target.id === "result-container") resultEl.classList.remove("open");
+  });
+  // ESC to close
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") resultEl.classList.remove("open");
+  });
+
+  // ---------- Mobile helpers ----------
+  function attachMobileUI() {
+    // Gender segmented -> sync hidden select
+    $$(".gender-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        $$(".gender-btn").forEach((b) =>
+          b.setAttribute("aria-selected", "false")
+        );
+        btn.setAttribute("aria-selected", "true");
+        genderEl.value = btn.dataset.g;
+      });
+    });
+    document
+      .querySelector('.gender-btn[data-g="female"]')
+      ?.setAttribute("aria-selected", "true");
+
+    // Age stepper
+    $("age-dec")?.addEventListener("click", () => {
+      const v = parseInt(ageEl.value || "0", 10) || 0;
+      ageEl.value = String(Math.max(0, v - 1));
+    });
+    $("age-inc")?.addEventListener("click", () => {
+      const v = parseInt(ageEl.value || "0", 10) || 0;
+      ageEl.value = String(v + 1);
+    });
+
+    // Sum chips
+    $$(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        sumEl.value = chip.dataset.sa;
+      });
+    });
+
+    // Modal segmented (highlight only)
+    $$(".modal-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        $$(".modal-btn").forEach((b) =>
+          b.setAttribute("aria-selected", "false")
+        );
+        btn.setAttribute("aria-selected", "true");
+        state.highlightedModal = btn.dataset.modal; // annual|semi|quarter|month
+      });
+    });
+    document
+      .querySelector('.modal-btn[data-modal="annual"]')
+      ?.setAttribute("aria-selected", "true");
+  }
+
+  // ---------- Boot ----------
   async function boot() {
+    if (location.protocol === "file:") {
+      console.warn("เปิดผ่าน file:// — เบราว์เซอร์บางตัวบล็อก fetch ไฟล์โลคัล");
+    }
     try {
       const res = await fetch("./pla_insurance.json", { cache: "no-cache" });
-      if (!res.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${res.status})`);
-      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          `โหลดข้อมูลไม่สำเร็จ (${res.status} ${res.statusText}). ตรวจสอบว่าไฟล์ pla_insurance.json อยู่โฟลเดอร์เดียวกับ index.html`
+        );
+      }
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error("ไม่สามารถอ่าน JSON ได้ (รูปแบบไม่ถูกต้อง)");
+      }
 
       validateDataset(data);
       state.dataset = data;
 
-      // index plans
       state.plansByKey.clear();
       data.plans.forEach((p) => state.plansByKey.set(p.planKey, p));
 
-      // populate UI
       populatePlans(data.plans);
       const firstPlan = data.plans[0];
       if (firstPlan) updateHintsFor(firstPlan);
 
-      // header badges
-      dsVersionEl.textContent = data?.fileInfo?.version
-        ? `v${data.fileInfo.version}`
-        : "v—";
-      dsUpdatedEl.textContent = data?.fileInfo?.lastUpdated
-        ? `อัปเดตล่าสุด: ${data.fileInfo.lastUpdated}`
-        : "อัปเดต —";
+      if (dsVersionEl)
+        dsVersionEl.textContent = data?.fileInfo?.version
+          ? `v${data.fileInfo.version}`
+          : "v—";
+      if (dsUpdatedEl)
+        dsUpdatedEl.textContent = data?.fileInfo?.lastUpdated
+          ? `อัปเดตล่าสุด: ${data.fileInfo.lastUpdated}`
+          : "อัปเดต —";
 
-      formEl.disabled = false;
       setStatus(
         `โหลดข้อมูลสำเร็จ • พบแบบประกัน ${data.plans.length} แบบ`,
         "ok"
       );
     } catch (err) {
-      formEl.disabled = true;
-      setStatus(err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล", "err");
+      console.error(err);
+      if (location.protocol === "file:") {
+        setStatus(
+          "โหลดข้อมูลไม่สำเร็จจากไฟล์โลคัล — โปรดเปิดผ่านเว็บเซิร์ฟเวอร์ (เช่น VSCode Live Server, npx serve, หรือ python -m http.server)",
+          "err"
+        );
+      } else {
+        setStatus(err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล", "err");
+      }
     }
   }
 
-  document.addEventListener("DOMContentLoaded", boot);
+  document.addEventListener("DOMContentLoaded", () => {
+    attachMobileUI();
+    boot();
+  });
 })();
-
-// === Mobile UI helpers ===
-const $q = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-const resultWrap = document.getElementById("result-container");
-
-// gender segmented -> ซิงก์กับ #gender
-$$(".gender-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    $$(".gender-btn").forEach((b) => b.setAttribute("aria-selected", "false"));
-    btn.setAttribute("aria-selected", "true");
-    document.getElementById("gender").value = btn.dataset.g;
-  });
-});
-// ตั้งค่าเริ่มต้นเพศหญิง
-$q('.gender-btn[data-g="female"]')?.setAttribute("aria-selected", "true");
-
-// age stepper
-document.getElementById("age-dec")?.addEventListener("click", () => {
-  const v = parseInt(document.getElementById("age").value || "0", 10) || 0;
-  document.getElementById("age").value = Math.max(0, v - 1);
-});
-document.getElementById("age-inc")?.addEventListener("click", () => {
-  const v = parseInt(document.getElementById("age").value || "0", 10) || 0;
-  document.getElementById("age").value = v + 1;
-});
-
-// sumAssured chips
-$$(".chip").forEach((chip) => {
-  chip.addEventListener("click", () => {
-    document.getElementById("sumAssured").value = chip.dataset.sa;
-  });
-});
-
-// modal segmented (ใช้สำหรับไฮไลต์ผลลัพธ์)
-let highlightedModal = "annual";
-$$(".modal-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    $$(".modal-btn").forEach((b) => b.setAttribute("aria-selected", "false"));
-    btn.setAttribute("aria-selected", "true");
-    highlightedModal = btn.dataset.modal; // annual|semi|quarter|month
-  });
-});
-$q('.modal-btn[data-modal="annual"]')?.setAttribute("aria-selected", "true");
-
-// เปิด bottom sheet เมื่อคำนวณสำเร็จ: wrap ผลลัพธ์
-const oldRender = renderResult; // อิงจากฟังก์ชันที่คุณมีอยู่
-renderResult = (payload) => {
-  oldRender(payload); // เติม HTML เดิมเข้า #result-container
-  // ห่อผลลัพธ์ให้เป็นแผ่น sheet + เพิ่ม grabber
-  const html = resultWrap.innerHTML;
-  resultWrap.innerHTML = `<div class="sheet">${'<div class="grabber"></div>'}${html}</div>`;
-  resultWrap.classList.add("open");
-  // ไฮไลต์งวดที่เลือก (ใส่ตัวหนา/สี)
-  try {
-    const map = { annual: 1, semi: 2, quarter: 3, month: 4 };
-    const row = resultWrap.querySelector(
-      `table tbody tr:nth-child(${map[highlightedModal]})`
-    );
-    row?.classList.add("bg-indigo-50");
-  } catch {}
-};
-// ปิด sheet เมื่อแตะนอก/ปัดลง (อย่างง่าย)
-resultWrap.addEventListener("click", (e) => {
-  if (e.target.id === "result-container") resultWrap.classList.remove("open");
-});
