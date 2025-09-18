@@ -1,4 +1,4 @@
-/* calculator.js — Runtime fetch JSON (no uploads, no riders) */
+/* calculator.js — Runtime fetch JSON (no uploads, no riders) + โมดลงวดชำระ */
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -18,6 +18,12 @@
   const state = {
     dataset: null,
     plansByKey: new Map(),
+    modalFactors: {
+      annual: 1,
+      semiAnnual: 0.52,
+      quarterly: 0.27,
+      monthly: 0.09,
+    }, // default fallback
   };
 
   // ------- Utilities -------
@@ -41,12 +47,24 @@
 
   const ceilTo = (num, unit = 1) => Math.ceil(num / unit) * unit;
 
-  // Simple schema guard for minimal safety
   const validateDataset = (data) => {
     if (!data || typeof data !== "object")
       throw new Error("รูปแบบข้อมูลไม่ถูกต้อง");
     if (!Array.isArray(data.plans) || data.plans.length === 0)
       throw new Error("ไม่พบรายการแบบประกันในไฟล์");
+    // modal factors (optional): รองรับทั้ง data.metadata.modalFactors หรือ data.modalFactors
+    const mf = data?.metadata?.modalFactors || data?.modalFactors;
+    if (mf && typeof mf === "object") {
+      const { annual, semiAnnual, quarterly, monthly } = mf;
+      if (
+        [annual, semiAnnual, quarterly, monthly].every(
+          (x) => typeof x === "number" && x > 0
+        )
+      ) {
+        state.modalFactors = { annual, semiAnnual, quarterly, monthly };
+      }
+    }
+
     data.plans.forEach((p, i) => {
       if (!p.planKey || !p.planName)
         throw new Error(`แผนลำดับที่ ${i + 1} ไม่มี planKey/planName`);
@@ -87,8 +105,7 @@
     if (plan.calculationType === "fixedRatePer1000") {
       return plan.fixedRate;
     }
-    // rateTable: หาค่า exact age
-    const row = plan.rates.find((r) => r.age === age);
+    const row = plan.rates.find((r) => r.age === age); // exact age table
     if (!row) return null;
     return sex === "male" ? row.male : row.female;
   }
@@ -96,7 +113,6 @@
   function applyDiscountPerThousand(plan, sumAssured, ratePerThousand) {
     if (!Array.isArray(plan.discounts) || plan.discounts.length === 0)
       return ratePerThousand;
-    // หา "ขั้นที่เข้าเกณฑ์สูงสุด"
     const sorted = [...plan.discounts].sort(
       (a, b) => (a.minSum || 0) - (b.minSum || 0)
     );
@@ -109,7 +125,6 @@
   }
 
   function computeAnnualPremium(plan, sex, age, sumAssured) {
-    // validate simple constraints
     if (age < plan.ageRange.min || age > plan.ageRange.max) {
       throw new Error(
         `อายุไม่อยู่ในช่วงที่รองรับ (${plan.ageRange.min}–${plan.ageRange.max})`
@@ -123,19 +138,25 @@
 
     const baseRate = lookupRate(plan, age, sex);
     if (baseRate == null) {
-      // แจ้งปีที่รองรับเพื่อช่วยผู้ใช้
       const years = (plan.rates || []).map((r) => r.age).sort((a, b) => a - b);
       const msg = years.length
         ? `อายุ ${age} ไม่มีเรตในตาราง สำหรับแผนนี้รองรับปี: ${years[0]}–${
             years[years.length - 1]
-          } (รายปีต่อปี)`
+          }`
         : `อายุ ${age} ไม่มีเรตในตาราง`;
       throw new Error(msg);
     }
 
     const rateEff = applyDiscountPerThousand(plan, sumAssured, baseRate);
-    const annual = ceilTo((sumAssured / 1000) * rateEff, 1); // ปัดบาทขึ้น
+    const annual = ceilTo((sumAssured / 1000) * rateEff, 1);
     return { baseRate, rateEff, annual };
+  }
+
+  function computeModalPremiums(annual, modalFactors) {
+    const semi = ceilTo(annual * modalFactors.semiAnnual, 1);
+    const quarter = ceilTo(annual * modalFactors.quarterly, 1);
+    const month = ceilTo(annual * modalFactors.monthly, 1);
+    return { annual, semi, quarter, month };
   }
 
   // ------- UI Logic -------
@@ -158,7 +179,6 @@
     ageEl.max = String(plan.ageRange?.max ?? 120);
     ageHintEl.textContent = `ช่วงอายุที่รับ: ${plan.ageRange.min}–${plan.ageRange.max} ปี`;
 
-    // ถ้าเป็น rateTable ให้แนะนำผู้ใช้ว่าใช้ “รายปี” (exact age)
     if (plan.calculationType === "rateTable" && Array.isArray(plan.rates)) {
       const minAge = Math.min(...plan.rates.map((r) => r.age));
       const maxAge = Math.max(...plan.rates.map((r) => r.age));
@@ -166,13 +186,14 @@
     }
   }
 
-  function renderResult({ plan, sex, age, sumAssured, breakdown }) {
+  function renderResult({ plan, sex, age, sumAssured, breakdown, modal }) {
     resultEl.classList.remove("hidden");
     resultEl.innerHTML = `
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-lg font-semibold text-gray-800">ผลการคำนวณ</h3>
         <span class="text-xs text-gray-500">หน่วย: บาท</span>
       </div>
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div><span class="text-gray-500">แบบประกัน:</span> <span class="font-medium">${
           plan.planName
@@ -196,11 +217,55 @@
           <div class="font-semibold">${THB.format(breakdown.rateEff)}</div>
         </div>
         <hr class="my-3"/>
-        <div class="flex items-center justify-between">
-          <div class="text-gray-700 font-medium">เบี้ยประกัน “รายปี”</div>
-          <div class="text-indigo-700 font-bold text-lg">${THB.format(
-            breakdown.annual
-          )}</div>
+
+        <div class="overflow-hidden rounded-md border">
+          <table class="min-w-full text-sm">
+            <thead class="bg-gray-50 text-gray-600">
+              <tr>
+                <th class="text-left px-3 py-2">งวดชำระ</th>
+                <th class="text-right px-3 py-2">เบี้ย (บาท)</th>
+                <th class="text-right px-3 py-2 text-xs font-normal">ตัวคูณ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t">
+                <td class="px-3 py-2">รายปี</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+                  modal.annual
+                )}</td>
+                <td class="px-3 py-2 text-right">${
+                  state.modalFactors.annual
+                }</td>
+              </tr>
+              <tr class="border-t">
+                <td class="px-3 py-2">ราย 6 เดือน</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+                  modal.semi
+                )}</td>
+                <td class="px-3 py-2 text-right">${
+                  state.modalFactors.semiAnnual
+                }</td>
+              </tr>
+              <tr class="border-t">
+                <td class="px-3 py-2">ราย 3 เดือน</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+                  modal.quarter
+                )}</td>
+                <td class="px-3 py-2 text-right">${
+                  state.modalFactors.quarterly
+                }</td>
+              </tr>
+              <tr class="border-t">
+                <td class="px-3 py-2">รายเดือน</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
+                  modal.month
+                )}</td>
+                <td class="px-3 py-2 text-right">${
+                  state.modalFactors.monthly
+                }</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     `;
@@ -227,7 +292,9 @@
         throw new Error("กรุณาระบุทุนประกันเป็นตัวเลข");
 
       const breakdown = computeAnnualPremium(plan, sex, age, sumAssured);
-      renderResult({ plan, sex, age, sumAssured, breakdown });
+      const modal = computeModalPremiums(breakdown.annual, state.modalFactors);
+
+      renderResult({ plan, sex, age, sumAssured, breakdown, modal });
       setStatus("คำนวณสำเร็จ", "ok");
     } catch (err) {
       setStatus(err.message || "เกิดข้อผิดพลาดในการคำนวณ", "err");
@@ -238,7 +305,6 @@
   // ------- Boot: fetch dataset at runtime -------
   async function boot() {
     try {
-      // ถ้าต้อง bust cache: เพิ่ม ?v=YYYYMMDD ตามเวอร์ชันจริงได้
       const res = await fetch("./pla_insurance.json", { cache: "no-cache" });
       if (!res.ok) throw new Error(`โหลดข้อมูลไม่สำเร็จ (${res.status})`);
       const data = await res.json();
