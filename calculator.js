@@ -1,8 +1,11 @@
-/* calculator.js — FINAL (mobile-first, runtime fetch JSON, no uploads, no riders)
-   - Fixes loading hang, robust fetch errors, works with Index (mobile UI)
-   - Bottom sheet result + segmented buttons + chips + stepper
+/* calculator.js — desktop+mobile, inline result, dynamic min chip, auto-scroll on mobile
+   - Fetch JSON at runtime (pla_insurance.json ต้องอยู่โฟลเดอร์เดียวกับ index.html)
+   - คำนวณ 4 งวด (ปี/6ด./3ด./เดือน) แต่ไม่มี UI ให้เลือกงวด
+   - แสดงผล inline ใน #result-container
+   - ปุ่มคำนวณ: มือถือเต็มกว้าง, เดสก์ท็อปกว้างเท่าข้อความ (ควบคุมใน HTML)
+   - ชิปแรก = ทุนขั้นต่ำของแผน (minSumAssured)
+   - หลังคำนวณเลื่อนไปผลลัพธ์อัตโนมัติบนมือถือ
 */
-
 (() => {
   const $ = (id) => document.getElementById(id);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -18,6 +21,7 @@
   const resultEl = $("result-container");
   const dsVersionEl = $("dataset-version");
   const dsUpdatedEl = $("dataset-updated");
+  const chipMinEl = $("chip-min");
 
   const THB = new Intl.NumberFormat("th-TH");
   const state = {
@@ -29,7 +33,6 @@
       quarterly: 0.27,
       monthly: 0.09,
     }, // fallback
-    highlightedModal: "annual", // annual | semi | quarter | month
   };
 
   // ---------- Utils ----------
@@ -60,7 +63,6 @@
     if (!Array.isArray(data.plans) || data.plans.length === 0)
       throw new Error("ไม่พบรายการแบบประกันในไฟล์");
 
-    // modal factors (optional)
     const mf = data?.metadata?.modalFactors || data?.modalFactors;
     if (mf && typeof mf === "object") {
       const { annual, semiAnnual, quarterly, monthly } = mf;
@@ -112,7 +114,7 @@
   // ---------- Engine ----------
   function lookupRate(plan, age, sex) {
     if (plan.calculationType === "fixedRatePer1000") return plan.fixedRate;
-    const row = plan.rates.find((r) => r.age === age); // exact age table
+    const row = plan.rates.find((r) => r.age === age);
     if (!row) return null;
     return sex === "male" ? row.male : row.female;
   }
@@ -175,6 +177,16 @@
     }
   }
 
+  function updateDynamicMinChip(plan) {
+    // ชิปปุ่มแรก = ทุนขั้นต่ำของแผนปัจจุบัน
+    const min = plan.minSumAssured || 0;
+    const firstChip = chipMinEl || document.querySelector(".chip");
+    if (firstChip) {
+      firstChip.dataset.sa = String(min);
+      firstChip.textContent = THB.format(min);
+    }
+  }
+
   function updateHintsFor(plan) {
     sumEl.min = String(plan.minSumAssured || 0);
     sumEl.placeholder = `ไม่น้อยกว่า ${THB.format(plan.minSumAssured)} บาท`;
@@ -189,97 +201,98 @@
       const maxAge = Math.max(...plan.rates.map((r) => r.age));
       ageHintEl.textContent += ` • ตารางเรตรายปี: ${minAge}–${maxAge}`;
     }
+
+    updateDynamicMinChip(plan);
   }
 
   function renderResult({ plan, sex, age, sumAssured, breakdown, modal }) {
-    const inner = `
-      <div class=\"flex items-center justify-between mb-3\">
-        <h3 class=\"text-lg font-semibold text-gray-800\">ผลการคำนวณ</h3>
-        <span class=\"text-xs text-gray-500\">หน่วย: บาท</span>
+    // เขียนผลลัพธ์แบบ inline
+    resultEl.innerHTML = `
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold text-gray-800">ผลการคำนวณ</h3>
+        <span class="text-xs text-gray-500">หน่วย: บาท</span>
       </div>
 
-      <div class=\"grid grid-cols-1 md:grid-cols-2 gap-3 text-sm\">
-        <div><span class=\"text-gray-500\">แบบประกัน:</span> <span class=\"font-medium\">${
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <div><span class="text-gray-500">แบบประกัน:</span> <span class="font-medium">${
           plan.planName
         }</span></div>
-        <div><span class=\"text-gray-500\">ทุนประกัน:</span> <span class=\"font-medium\">${THB.format(
+        <div><span class="text-gray-500">ทุนประกัน:</span> <span class="font-medium">${THB.format(
           sumAssured
         )}</span></div>
-        <div><span class=\"text-gray-500\">เพศ:</span> <span class=\"font-medium\">${
+        <div><span class="text-gray-500">เพศ:</span> <span class="font-medium">${
           sex === "male" ? "ชาย" : "หญิง"
         }</span></div>
-        <div><span class=\"text-gray-500\">อายุ:</span> <span class=\"font-medium\">${age} ปี</span></div>
+        <div><span class="text-gray-500">อายุ:</span> <span class="font-medium">${age} ปี</span></div>
       </div>
 
-      <div class=\"mt-4 rounded-lg bg-white border p-4 text-sm\">
-        <div class=\"flex items-center justify-between\">
-          <div class=\"text-gray-500\">อัตราฐานต่อทุน 1,000</div>
-          <div class=\"font-semibold\">${THB.format(breakdown.baseRate)}</div>
+      <div class="mt-4 rounded-lg bg-white border p-4 text-sm">
+        <div class="flex items-center justify-between">
+          <div class="text-gray-500">อัตราฐานต่อทุน 1,000</div>
+          <div class="font-semibold">${THB.format(breakdown.baseRate)}</div>
         </div>
-        <div class=\"flex items-center justify-between mt-1\">
-          <div class=\"text-gray-500\">อัตราหลังหักส่วนลดขั้นบันได (ถ้ามี)</div>
-          <div class=\"font-semibold\">${THB.format(breakdown.rateEff)}</div>
+        <div class="flex items-center justify-between mt-1">
+          <div class="text-gray-500">อัตราหลังหักส่วนลดขั้นบันได (ถ้ามี)</div>
+          <div class="font-semibold">${THB.format(breakdown.rateEff)}</div>
         </div>
-        <hr class=\"my-3\"/>
+        <hr class="my-3"/>
 
-        <div class=\"overflow-hidden rounded-md border\">
-          <table class=\"min-w-full text-sm\">
-            <thead class=\"bg-gray-50 text-gray-600\">
+        <div class="overflow-hidden rounded-md border">
+          <table class="min-w-full text-sm">
+            <thead class="bg-gray-50 text-gray-600">
               <tr>
-                <th class=\"text-left px-3 py-2\">งวดชำระ</th>
-                <th class=\"text-right px-3 py-2\">เบี้ย (บาท)</th>
-                <th class=\"text-right px-3 py-2 text-xs font-normal\">ตัวคูณ</th>
+                <th class="text-left px-3 py-2">งวดชำระ</th>
+                <th class="text-right px-3 py-2">เบี้ย (บาท)</th>
+                <th class="text-right px-3 py-2 text-xs font-normal">ตัวคูณ</th>
               </tr>
             </thead>
             <tbody>
-              <tr class=\"border-t\" data-modal-row=\"annual\">
-                <td class=\"px-3 py-2\">รายปี</td>
-                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
+              <tr class="border-t">
+                <td class="px-3 py-2">รายปี</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
                   modal.annual
                 )}</td>
-                <td class=\"px-3 py-2 text-right\">${
+                <td class="px-3 py-2 text-right">${
                   state.modalFactors.annual
                 }</td>
               </tr>
-              <tr class=\"border-t\" data-modal-row=\"semi\">
-                <td class=\"px-3 py-2\">ราย 6 เดือน</td>
-                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
+              <tr class="border-t">
+                <td class="px-3 py-2">ราย 6 เดือน</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
                   modal.semi
                 )}</td>
-                <td class=\"px-3 py-2 text-right\">${
+                <td class="px-3 py-2 text-right">${
                   state.modalFactors.semiAnnual
                 }</td>
               </tr>
-              <tr class=\"border-t\" data-modal-row=\"quarter\">
-                <td class=\"px-3 py-2\">ราย 3 เดือน</td>
-                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
+              <tr class="border-t">
+                <td class="px-3 py-2">ราย 3 เดือน</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
                   modal.quarter
                 )}</td>
-                <td class=\"px-3 py-2 text-right\">${
+                <td class="px-3 py-2 text-right">${
                   state.modalFactors.quarterly
                 }</td>
               </tr>
-              <tr class=\"border-t\" data-modal-row=\"month\">
-                <td class=\"px-3 py-2\">รายเดือน</td>
-                <td class=\"px-3 py-2 text-right font-semibold\">${THB.format(
+              <tr class="border-t">
+                <td class="px-3 py-2">รายเดือน</td>
+                <td class="px-3 py-2 text-right font-semibold">${THB.format(
                   modal.month
                 )}</td>
-                <td class=\"px-3 py-2 text-right\">${
+                <td class="px-3 py-2 text-right">${
                   state.modalFactors.monthly
                 }</td>
               </tr>
             </tbody>
           </table>
         </div>
-      </div>`;
+      </div>
+    `;
 
-    resultEl.innerHTML = `<div class="sheet p-4"><div class="grabber"></div>${inner}</div>`;
-    resultEl.classList.add("open");
-
-    const row = resultEl.querySelector(
-      `[data-modal-row="${state.highlightedModal}"]`
-    );
-    row?.classList.add("bg-indigo-50");
+    // เลื่อนไปผลลัพธ์อัตโนมัติบนมือถือ
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   // ---------- Events ----------
@@ -288,7 +301,7 @@
     if (plan) updateHintsFor(plan);
   });
 
-  document.getElementById("calculate-btn").addEventListener("click", (e) => {
+  $("calculate-btn").addEventListener("click", (e) => {
     e.preventDefault();
     try {
       const plan = state.plansByKey.get(planEl.value);
@@ -310,21 +323,13 @@
     } catch (err) {
       console.error(err);
       setStatus(err.message || "เกิดข้อผิดพลาดในการคำนวณ", "err");
-      resultEl.classList.remove("open");
-      resultEl.innerHTML = "";
+      resultEl.innerHTML = `<div class="text-sm text-rose-700">${
+        err.message || "เกิดข้อผิดพลาด"
+      }</div>`;
     }
   });
 
-  // Close bottom sheet when clicking outside content
-  resultEl.addEventListener("click", (e) => {
-    if (e.target.id === "result-container") resultEl.classList.remove("open");
-  });
-  // ESC to close
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") resultEl.classList.remove("open");
-  });
-
-  // ---------- Mobile helpers ----------
+  // Mobile helpers
   function attachMobileUI() {
     // Gender segmented -> sync hidden select
     $$(".gender-btn").forEach((btn) => {
@@ -356,41 +361,17 @@
         sumEl.value = chip.dataset.sa;
       });
     });
-
-    // Modal segmented (highlight only)
-    $$(".modal-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        $$(".modal-btn").forEach((b) =>
-          b.setAttribute("aria-selected", "false")
-        );
-        btn.setAttribute("aria-selected", "true");
-        state.highlightedModal = btn.dataset.modal; // annual|semi|quarter|month
-      });
-    });
-    document
-      .querySelector('.modal-btn[data-modal="annual"]')
-      ?.setAttribute("aria-selected", "true");
   }
 
-  // ---------- Boot ----------
+  // Boot
   async function boot() {
-    if (location.protocol === "file:") {
-      console.warn("เปิดผ่าน file:// — เบราว์เซอร์บางตัวบล็อก fetch ไฟล์โลคัล");
-    }
     try {
       const res = await fetch("./pla_insurance.json", { cache: "no-cache" });
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(
-          `โหลดข้อมูลไม่สำเร็จ (${res.status} ${res.statusText}). ตรวจสอบว่าไฟล์ pla_insurance.json อยู่โฟลเดอร์เดียวกับ index.html`
+          `โหลดข้อมูลไม่สำเร็จ (${res.status} ${res.statusText})`
         );
-      }
-
-      let data;
-      try {
-        data = await res.json();
-      } catch (e) {
-        throw new Error("ไม่สามารถอ่าน JSON ได้ (รูปแบบไม่ถูกต้อง)");
-      }
+      const data = await res.json();
 
       validateDataset(data);
       state.dataset = data;
@@ -405,23 +386,16 @@
       if (dsVersionEl)
         dsVersionEl.textContent = data?.fileInfo?.version
           ? `v${data.fileInfo.version}`
-          : "v—";
+          : "v-";
       if (dsUpdatedEl)
         dsUpdatedEl.textContent = data?.fileInfo?.lastUpdated
-          ? `อัปเดต: ${data.fileInfo.lastUpdated}`
+          ? `อัปเดตล่าสุด: ${data.fileInfo.lastUpdated}`
           : "อัปเดต —";
 
       setStatus(`โหลดข้อมูลสำเร็จ`, "ok");
     } catch (err) {
       console.error(err);
-      if (location.protocol === "file:") {
-        setStatus(
-          "โหลดข้อมูลไม่สำเร็จจากไฟล์โลคัล — โปรดเปิดผ่านเว็บเซิร์ฟเวอร์ (เช่น VSCode Live Server, npx serve, หรือ python -m http.server)",
-          "err"
-        );
-      } else {
-        setStatus(err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล", "err");
-      }
+      setStatus(err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล", "err");
     }
   }
 
