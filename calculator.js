@@ -408,13 +408,10 @@
           : "v—";
       if (dsUpdatedEl)
         dsUpdatedEl.textContent = data?.fileInfo?.lastUpdated
-          ? `อัปเดตล่าสุด: ${data.fileInfo.lastUpdated}`
+          ? `อัปเดต: ${data.fileInfo.lastUpdated}`
           : "อัปเดต —";
 
-      setStatus(
-        `โหลดข้อมูลสำเร็จ • พบแบบประกัน ${data.plans.length} แบบ`,
-        "ok"
-      );
+      setStatus(`โหลดข้อมูลสำเร็จ`, "ok");
     } catch (err) {
       console.error(err);
       if (location.protocol === "file:") {
